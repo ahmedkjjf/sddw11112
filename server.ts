@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import { GoogleGenAI } from "@google/genai";
 import { setSecurityHeaders, rateLimiter, requestShieldWAF, validateWebhookUrl } from "./src/lib/serverSecurity";
 
 dotenv.config();
@@ -128,6 +129,80 @@ async function startServer() {
       return res.json({ success: true, token: "alzaabi_root_v5_" + Date.now() });
     }
     res.status(401).json({ success: false, message: "INVALID_SECURITY_CODE" });
+  });
+
+  // Secure Server-side Gemini Stream Proxy
+  app.post("/api/gemini/stream", async (req, res) => {
+    try {
+      const { code, originalCode, type, task } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server. Please add it in project secrets." });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+
+      const safeTruncate = (text: string, max = 350000) => {
+        if (!text) return "";
+        if (text.length <= max) return text;
+        return text.substring(0, max) + "\n\n-- [!! WARNING: CODE TRUNCATED FOR CONTEXT !!]\n";
+      };
+
+      let prompt = "";
+      if (task === "analyze") {
+        prompt = `[ANALYSIS_PROTOCOL: STRICT_HIGH_FIDELITY_CODE_DEOBFUSCATION_AND_REBUILT]
+ROLE: You are an expert code de-obfuscator, reverse engineer and logic restorer.
+OBJECTIVE: Take the obfuscated target code and reconstruct it into clean, beautifully formatted, fully readable source code while maintaining 100% logic and operational parity.
+
+CRITICAL PARITY PROTOCOL:
+1. The output code MUST represent the EXACT logic, functions, mathematical calculations, API routes, network endpoints, visual interfaces, controls, structures, and behavior of the input files.
+2. YOU ARE STRICTLY FORBIDDEN FROM HALLUCINATING or generating generic, standard, simulated, or template code "from your head". Do not write a generic script based on keyword association.
+3. If some strings or functions appear highly obfuscated, unpack them semantically based on any available variable mappings, but do NOT replace them with placeholder comments. Every single structural block and line of logic must be faithfully reconstructed.
+4. The output programming language MUST be the exact same programming language as the target input code (e.g., if target is Lua, output is Lua. If Javascript, output is Javascript. If Python, output is Python).
+
+RECONSTRUCTION RULES:
+- Rename all scrambled indices, single-character dummy letters, obf functions, and string arrays to clean human-readable names using clear naming conventions based on context.
+- Inline, unpack, or decode arrays of encoded constant strings (Hex, Base64, arrays) back into clear variables or direct usages to make them transparently readable.
+- Provide ONLY the final fully reconstructed clean code inside a clean markdown code block (e.g., \`\`\`lua ... \`\`\` or \`\`\`javascript ... \`\`\`).
+- DO NOT write any report, markdown list, introductory note, explanation, bullet points, or friendly conversation. Provide ONLY the markdown code block.
+
+ORIGINAL OBFUSCATED INPUT CODE (FOR REAL LOGIC):
+${safeTruncate(originalCode)}
+
+PRE-PROCESSED LAYER CODES (IF HELPFUL):
+${safeTruncate(code)}
+
+INPUT TYPE METHOD: ${type}`;
+      } else if (task === "normalize") {
+        prompt = `[TASK: HUMAN_VARIABLES] Take the input code and rename scramble indices and generic letters to clean human-readable names. Preserve 100% original logical flows and functions. Write only the de-scrambled code block without discussion.\nINPUT:\n${safeTruncate(code)}`;
+      } else if (task === "scan") {
+        prompt = `[TASK: SECURITY_VULNERABILITY_SCAN] Analyze the code for exploits, backdoors, standard flaws, hidden triggers, or dangerous logic. Provide risk levels and recommended mitigation actions. Write the report purely in Arabic markdown formatting. Keep the analysis thorough.\nINPUT CODE:\n${safeTruncate(code)}`;
+      }
+
+      // Configure headers for streaming
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Transfer-Encoding", "chunked");
+
+      const responseStream = await ai.models.generateContentStream({
+        model: "gemini-3.5-flash",
+        contents: prompt
+      });
+
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          res.write(chunk.text);
+        }
+      }
+      res.end();
+    } catch (err: any) {
+      console.error("Gemini server proxy stream error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err?.message || "Internal server error during Gemini analysis process." });
+      } else {
+        res.end();
+      }
+    }
   });
 
   // Vite middleware setup
