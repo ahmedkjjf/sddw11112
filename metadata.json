@@ -1,0 +1,6 @@
+{
+  "name": "Neural Security Decoder V5",
+  "description": "Advanced multi-layered deobfuscation system with integrated dynamic admin authentication and XOR-encrypted rotating security codes synced to Discord.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": []
+}

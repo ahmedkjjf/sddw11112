@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Global Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    // --- Default Deny ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'email', 'credits', 'isPremium']) &&
+               data.uid == request.auth.uid &&
+               data.email is string && data.email.size() <= 200 &&
+               data.credits is number &&
+               data.isPremium is bool;
+      }
+
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().credits == 5; // Start with 5 free credits
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName']); // Can only change name
+    }
+
+    // --- Deobfuscation Logs ---
+    match /logs/{logId} {
+      function isValidLog(data) {
+        return data.keys().hasAll(['userId', 'timestamp', 'originalSnippet', 'resultSnippet', 'modelUsed']) &&
+               data.userId == request.auth.uid &&
+               data.originalSnippet is string && data.originalSnippet.size() <= 100000 &&
+               data.resultSnippet is string && data.resultSnippet.size() <= 100000 &&
+               data.timestamp == request.time;
+      }
+
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidLog(incoming());
+      // No updates or deletes for logs - they are permanent history records
+    }
+
+    // --- System Config ---
+    match /system_config/{configId} {
+      allow get, list: if true;
+      allow write: if true; 
+    }
+
+    // --- Banned IPs ---
+    match /banned_ips/{banId} {
+      function isValidBan(data) {
+        return data.keys().hasAll(['ip', 'reason', 'timestamp', 'expiresAt']) &&
+               data.ip is string && data.ip.size() <= 64 &&
+               data.reason is string && data.reason.size() <= 500 &&
+               data.expiresAt is number;
+      }
+      
+      allow get, list: if true; 
+      allow create: if isValidBan(incoming()); 
+      allow delete: if true; 
+    }
+
+    // --- Security Logs ---
+    match /security_logs/{logId} {
+      function isValidSecurityLog(data) {
+        return data.keys().hasAll(['type', 'ip', 'location', 'details', 'timestamp']) &&
+               data.type is string && data.type.size() <= 100 &&
+               data.ip is string && data.ip.size() <= 64 &&
+               data.details is string && data.details.size() <= 1000;
+      }
+
+      allow create: if isValidSecurityLog(incoming());
+      allow read, list: if true; // In production, restrict this to admins
+    }
+
+    // --- Vault ---
+    match /vault/{archiveId} {
+      allow read: if true; // Public vault for now
+      allow create: if true; // Anyone can sync
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and usage limits.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "credits": { "type": "number", "description": "Remaining AI credits" },
+        "isPremium": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "credits", "isPremium"]
+    },
+    "DeobfuscationLog": {
+      "title": "Deobfuscation Log",
+      "description": "History of code analysis and deobfuscation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "originalSnippet": { "type": "string" },
+        "resultSnippet": { "type": "string" },
+        "modelUsed": { "type": "string" }
+      },
+      "required": ["userId", "timestamp", "originalSnippet", "resultSnippet"]
+    },
+    "BannedIp": {
+      "title": "Banned IP Record",
+      "description": "Information about a banned IP address.",
+      "type": "object",
+      "properties": {
+        "ip": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "number" },
+        "visitorData": { "type": "object" }
+      },
+      "required": ["ip", "reason", "timestamp", "expiresAt"]
+    },
+    "SystemConfig": {
+      "title": "System Configuration",
+      "description": "Global settings for the application security system.",
+      "type": "object",
+      "properties": {
+        "autoBanEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["autoBanEnabled"]
+    },
+    "SecurityLog": {
+      "title": "Security Log",
+      "description": "Real-time records of security events and visitor intel.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "ip": { "type": "string" },
+        "location": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["type", "ip", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Private user profiles"
+    },
+    "/logs/{logId}": {
+      "schema": "DeobfuscationLog",
+      "description": "Historical logs of deobfuscation attempts"
+    },
+    "/security_logs/{logId}": {
+      "schema": "SecurityLog",
+      "description": "Real-time security and visitor logs"
+    },
+    "/banned_ips/{banId}": {
+      "schema": "BannedIp",
+      "description": "Record of globally banned IP addresses"
+    },
+    "/system_config/{configId}": {
+      "schema": "SystemConfig",
+      "description": "Global system configuration settings"
+    }
+  }
+}
