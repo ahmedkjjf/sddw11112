@@ -259,6 +259,23 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: adminCodeInput })
       });
+      
+      // If server returned status !== 200/not JSON (such as static server redirecting payload on Netlify), trigger fallback validation
+      if (!resp.ok || !resp.headers.get('content-type')?.includes('application/json')) {
+        const fallbackKeys = ["@Alzaabi_Admin_2026", "ALZAABI_BYPASS_RESET_KEY_2026", "ahmed_alzaabi"];
+        if (fallbackKeys.includes(adminCodeInput)) {
+          setIsAdminAuthenticated(true);
+          sessionStorage.setItem('alzaabi_admin_auth', 'true');
+          sessionStorage.setItem('alzaabi_admin_auth_code', adminCodeInput);
+          addLog('KEY_AUTH_SUCCESS: ACCESS_GRANTED_VIA_FALLBACK_KEY', 'success');
+          return;
+        } else {
+          setLoginError('INVALID_SECURITY_CODE');
+          addLog('KEY_AUTH_FAILURE: INVALID_CODE_ATTEMPT_STATIC_FALLBACK', 'warn');
+          return;
+        }
+      }
+
       const data = await resp.json();
       if (data.success) {
         setIsAdminAuthenticated(true);
@@ -270,7 +287,16 @@ export default function App() {
         addLog('KEY_AUTH_FAILURE: INVALID_CODE_ATTEMPT', 'warn');
       }
     } catch (e) {
-      setLoginError('AUTH_SERVER_ERROR');
+      // Catch exceptions (network fails, fetch throws block on Netlify) and test fallback keys
+      const fallbackKeys = ["@Alzaabi_Admin_2026", "ALZAABI_BYPASS_RESET_KEY_2026", "ahmed_alzaabi"];
+      if (fallbackKeys.includes(adminCodeInput)) {
+        setIsAdminAuthenticated(true);
+        sessionStorage.setItem('alzaabi_admin_auth', 'true');
+        sessionStorage.setItem('alzaabi_admin_auth_code', adminCodeInput);
+        addLog('KEY_AUTH_SUCCESS: ACCESS_GRANTED_VIA_FALLBACK_KEY', 'success');
+      } else {
+        setLoginError('AUTH_SERVER_ERROR');
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -1852,6 +1878,15 @@ export default function App() {
                       Dynamic Code Encryption Active<br/>
                       <span className="text-[#00ff00] font-bold animate-pulse">SYSTEM_KEY_ROTATION: {Math.random().toString(36).substring(2, 10).toUpperCase()}</span><br/>
                       Check Discord Webhook for 30-min Rotating Key
+                      {window.location.hostname.includes('netlify.app') && (
+                        <span className="block mt-4 text-[10px] font-bold text-yellow-400 normal-case tracking-normal">
+                          ⚠️ تنبيه: يتم تشغيل الموقع على بيئة سكونية (Netlify) بدون خمات خادم نشطة.
+                          <br />
+                          استخدم مفتاح الأمان الاحتياطي لفتح اللوحة:
+                          <br />
+                          <span className="inline-block mt-2 bg-yellow-400/20 text-yellow-300 px-3 py-1 rounded font-mono select-all border border-yellow-400/30 text-xs">@Alzaabi_Admin_2026</span>
+                        </span>
+                      )}
                     </p>
 
                     <div className="absolute left-4 top-4 hidden lg:block overflow-hidden h-48 w-48 opacity-20 transition-opacity hover:opacity-100">
