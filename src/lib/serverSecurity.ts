@@ -208,10 +208,25 @@ export function setSecurityHeaders(req: Request, res: Response, next: NextFuncti
  * DoS & Brute Force & Session Fixation Rate Limiter
  */
 export function rateLimiter(req: Request, res: Response, next: NextFunction) {
-  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-  const now = Date.now();
+  // Only apply rate limiting to backend API requests
+  if (!req.path.startsWith("/api/")) {
+    return next();
+  }
 
+  // Parse x-forwarded-for safely since it may contain a comma-separated list of IPs
+  let ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
+  if (ip.includes(",")) {
+    ip = ip.split(",")[0].trim();
+  }
+
+  // Bypass rate limiting for localhost/loopback to ensure zero lag in local development
+  if (ip === "127.0.0.1" || ip === "localhost" || ip === "::1" || ip === "::ffff:127.0.0.1") {
+    return next();
+  }
+
+  const now = Date.now();
   const record = rateLimitMap.get(ip);
+  
   if (!record) {
     rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return next();
@@ -224,7 +239,10 @@ export function rateLimiter(req: Request, res: Response, next: NextFunction) {
   }
 
   record.count++;
-  if (record.count > MAX_REQUESTS_PER_WINDOW) {
+  
+  // Safe high threshold for backend APIs (350 API calls per minute)
+  const dynamicMax = 350;
+  if (record.count > dynamicMax) {
     return res.status(429).json({
       error: "RATE_LIMITED",
       message: "TOO_MANY_REQUESTS: Please calm down your engine. Protection enabled."
@@ -238,6 +256,11 @@ export function rateLimiter(req: Request, res: Response, next: NextFunction) {
  * Web Application Firewall & Payload Shield WAF & Parameter Pollution Guard
  */
 export function requestShieldWAF(req: Request, res: Response, next: NextFunction) {
+  // Only apply WAF validation shields to actual backend API requests
+  if (!req.path.startsWith("/api/")) {
+    return next();
+  }
+
   // 1. Host Header Injection Defense
   const host = req.headers["host"];
   if (host && typeof host === "string") {
@@ -375,4 +398,121 @@ export function validateWebhookUrl(urlStr: string): boolean {
   } catch (error) {
     return false;
   }
+}
+
+/**
+ * 6. Protection against Website Downloaders, Scrapers, and Site Grabbers
+ * (e.g. HTTrack, wget, curl, Teleport Pro, Scrapy, Cyotek WebCopy, SiteSucker, etc.)
+ */
+export function blockWebsiteDownloaders(req: Request, res: Response, next: NextFunction) {
+  const userAgent = (req.headers["user-agent"] || "").toLowerCase();
+
+  // 1. Block missing or extremely short User-Agent headers (typically bot/downloader connections)
+  if (!userAgent || userAgent.length < 10) {
+    return res.status(403).json({
+      success: false,
+      code: "DOWNLOADER_BLOCKED",
+      message: "Security check: Empty or invalid User-Agent is prohibited."
+    });
+  }
+
+  // 2. Comprehensive lists of known website downloaders, site cloners, grabbers, and scrapers
+  const blacklistedUserAgents = [
+    "httrack",          // Most common website copier
+    "wget",             // GNU Wget downloader
+    "curl",             // Command line curl
+    "teleport",         // Teleport Pro / Teleport Ultra
+    "webcopy",          // Cyotek WebCopy
+    "cyotek",
+    "sitesucker",       // Mac SiteSucker tool
+    "sitegrabber",      // Website grabber
+    "grabber",
+    "sitecloner",
+    "scrapy",           // Python scraper skeleton
+    "offline explorer", // Offline browser / site downloader
+    "blackwidow",       // Known site ripper
+    "webstripper",
+    "getweb",
+    "siphon",
+    "webdownloader",
+    "webcapture",
+    "screaming frog",   // SEO spider / crawler
+    "ia_archiver",
+    "archive.org_bot",
+    "scooter",
+    "spidertoy",
+    "extractor",
+    "python-requests",
+    "python",
+    "aiohttp",
+    "urllib",
+    "java/",
+    "libwww-perl",
+    "go-http-client",
+    "guzzlehttp",
+    "axios",            // Scripted API clients without legitimate headers
+    "postman",
+    "headlesschrome",
+    "puppeteer",
+    "playwright",
+    "selenium",
+    "webzip",
+    "stripper",
+    "sucker",
+    "rip"
+  ];
+
+  const match = blacklistedUserAgents.find(agent => userAgent.includes(agent));
+  if (match) {
+    console.warn(`[SECURITY WARN] Website Downloader/Scraper blocked: User-Agent: "${userAgent}" matched "${match}"`);
+    return res.status(403).json({
+      success: false,
+      code: "DOWNLOADER_BLOCKED",
+      message: "Security shield: Automated website downloaders, scrapers, or cloners are strictly prohibited."
+    });
+  }
+
+  // 3. Inspect specific website downloader signatures & headers
+  // For example, HTTrack sets custom headers like "X-Mailer" containing "HTTrack" or "X-Track"
+  const xMailer = (req.headers["x-mailer"] as string || "").toLowerCase();
+  const xTrack = req.headers["x-track"] || req.headers["x-referer"] || req.headers["x-httrack"];
+  
+  if (xMailer.includes("httrack") || xTrack) {
+    console.warn(`[SECURITY WARN] HTTrack signatures detected in request headers.`);
+    return res.status(403).json({
+      success: false,
+      code: "HTTRACK_BLOCKED",
+      message: "Security violation: HTTrack mirroring is blocked on this origin."
+    });
+  }
+
+  // 4. Verification of Standard Browser Request Flow for html page requests
+  // Real browser requesting page / document of website always provides an Accept header matching 'text/html'
+  // along with standard fetch indicators in modern browsers.
+  // If we receive a request for HTML with curl/Python/unspecified agent but spoofed UA, we check standard browser headers.
+  const acceptHeader = (req.headers["accept"] || "").toLowerCase();
+  
+  // Only inspect general page request paths
+  if (req.path === "/" || req.path.endsWith(".html")) {
+    // A real desktop/mobile browser requesting HTML typically has these headers
+    const hasSecFetch = req.headers["sec-fetch-dest"] || req.headers["sec-ch-ua"] || req.headers["accept-language"];
+    
+    // If it's trying to request HTML document without standard browser telemetry indicators, it's flagged as potential grabber/ripper
+    if (acceptHeader.includes("text/html") && !hasSecFetch) {
+      // Let's do a double check on extremely common desktop patterns to prevent rare edge cases
+      const isCommonBrowser = userAgent.includes("mozilla/5.0") && (userAgent.includes("safari") || userAgent.includes("firefox") || userAgent.includes("chrome"));
+      
+      // If it looks like mozilla but is missing all normal browser headers (sec-fetch-*, accept-language, etc.), it's likely a scraper or site downloader.
+      if (!isCommonBrowser) {
+        console.warn(`[SECURITY WARN] Blocked suspicious request lacking standard browser fetch indicators: UA="${userAgent}"`);
+        return res.status(403).json({
+          success: false,
+          code: "SCRAPER_DETECTED",
+          message: "Verification failed. Please use a standard web browser."
+        });
+      }
+    }
+  }
+
+  next();
 }
