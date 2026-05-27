@@ -3,13 +3,16 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
-import { setSecurityHeaders, rateLimiter, requestShieldWAF, validateWebhookUrl } from "./src/lib/serverSecurity";
+import { setSecurityHeaders, rateLimiter, requestShieldWAF, validateWebhookUrl, blockWebsiteDownloaders } from "./src/lib/serverSecurity";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Block automated scrapers and website downloaders (e.g. HTTrack, Wget, Curl, Cyotek)
+  app.use(blockWebsiteDownloaders);
 
   // Set HTTP Security Headers to mitigate XSS, Clickjacking, MIME spoofing
   app.use(setSecurityHeaders);
